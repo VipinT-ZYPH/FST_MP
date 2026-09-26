@@ -4,7 +4,7 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Script from 'next/script';
-import { Sparkles, ArrowLeft, AlertCircle, Shield, CheckCircle2, Database, Mail, Lock, User as UserIcon, LogIn, Server, X, Key } from 'lucide-react';
+import { Sparkles, ArrowLeft, AlertCircle, Shield, CheckCircle2, Database, Mail, Lock, User as UserIcon, LogIn, Server, X, Key, Info } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -40,7 +40,7 @@ function LoginForm() {
   // Google OAuth State
   const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [googleClientId, setGoogleClientId] = useState(
-    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '35927538581-web.apps.googleusercontent.com'
+    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ''
   );
   const [googleEmailInput, setGoogleEmailInput] = useState('vipinthingalaya7@gmail.com');
 
@@ -59,6 +59,12 @@ function LoginForm() {
   const handleTriggerGoogleOAuth = () => {
     setError(null);
 
+    // If client ID is missing or invalid on Vercel preview, show modal immediately
+    if (!googleClientId || !googleClientId.includes('apps.googleusercontent.com')) {
+      setShowGoogleModal(true);
+      return;
+    }
+
     if (typeof window !== 'undefined' && window.google?.accounts?.oauth2) {
       try {
         const client = window.google.accounts.oauth2.initTokenClient({
@@ -68,7 +74,6 @@ function LoginForm() {
             if (response && response.access_token) {
               setLoading(true);
               try {
-                // Fetch real verified user profile directly from Google OAuth API
                 const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                   headers: { Authorization: `Bearer ${response.access_token}` },
                 });
@@ -89,13 +94,19 @@ function LoginForm() {
 
                   const data = await res.json();
                   if (data.success) {
-                    setSuccessInfo(`Verified & logged in via Google as ${googleProfile.email}!`);
+                    setSuccessInfo(`Verified & logged in as ${googleProfile.email}! Redirecting...`);
                     if (data.token) {
+                      document.cookie = `ai_journal_session=${data.token}; path=/; max-age=2592000; SameSite=Lax`;
                       document.cookie = `ai_journal_session=${data.token}; path=/; max-age=2592000; SameSite=None; Secure`;
                     }
+                    if (data.user) {
+                      try {
+                        localStorage.setItem('ai_journal_user', JSON.stringify(data.user));
+                      } catch {}
+                    }
                     setTimeout(() => {
-                      window.location.href = redirectUrl;
-                    }, 500);
+                      window.location.replace(redirectUrl || '/dashboard');
+                    }, 200);
                   } else {
                     throw new Error(data.error || 'Failed to authenticate user.');
                   }
@@ -108,7 +119,6 @@ function LoginForm() {
                 setLoading(false);
               }
             } else if (response?.error) {
-              // If OAuth Client ID requires origin authorization in GCP
               setShowGoogleModal(true);
             }
           },
@@ -156,6 +166,7 @@ function LoginForm() {
       }
 
       if (data.token) {
+        document.cookie = `ai_journal_session=${data.token}; path=/; max-age=2592000; SameSite=Lax`;
         document.cookie = `ai_journal_session=${data.token}; path=/; max-age=2592000; SameSite=None; Secure`;
       }
       if (data.user) {
@@ -166,8 +177,8 @@ function LoginForm() {
 
       setSuccessInfo(`Authenticated with Google as ${data.user.email}! Redirecting...`);
       setTimeout(() => {
-        window.location.href = redirectUrl;
-      }, 500);
+        window.location.replace(redirectUrl || '/dashboard');
+      }, 200);
     } catch (err: any) {
       setError(err.message || 'Google authentication failed.');
       setLoading(false);
@@ -202,9 +213,10 @@ function LoginForm() {
         throw new Error(data.error || 'Failed to authenticate user.');
       }
 
-      setSuccessInfo(`Authenticated successfully!`);
+      setSuccessInfo(`Authenticated successfully! Redirecting...`);
 
       if (data.token) {
+        document.cookie = `ai_journal_session=${data.token}; path=/; max-age=2592000; SameSite=Lax`;
         document.cookie = `ai_journal_session=${data.token}; path=/; max-age=2592000; SameSite=None; Secure`;
       }
       if (data.user) {
@@ -214,8 +226,8 @@ function LoginForm() {
       }
 
       setTimeout(() => {
-        window.location.href = redirectUrl;
-      }, 500);
+        window.location.replace(redirectUrl || '/dashboard');
+      }, 200);
     } catch (err: any) {
       console.error('Auth error:', err);
       setError(err.message || 'Authentication failed. Please check your credentials.');
@@ -246,6 +258,7 @@ function LoginForm() {
       }
 
       if (data.token) {
+        document.cookie = `ai_journal_session=${data.token}; path=/; max-age=2592000; SameSite=Lax`;
         document.cookie = `ai_journal_session=${data.token}; path=/; max-age=2592000; SameSite=None; Secure`;
       }
       if (data.user) {
@@ -256,8 +269,8 @@ function LoginForm() {
 
       setSuccessInfo(`Signed in as ${demoName}. Redirecting to journal dashboard...`);
       setTimeout(() => {
-        window.location.href = redirectUrl;
-      }, 400);
+        window.location.replace(redirectUrl || '/dashboard');
+      }, 200);
     } catch (err: any) {
       setError(err.message || 'Failed to log in as demo account.');
       setLoading(false);
@@ -272,7 +285,7 @@ function LoginForm() {
       {/* Google Auth Modal */}
       {showGoogleModal && (
         <div className="fixed inset-0 z-50 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-stone-200 relative animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-stone-200 relative animate-in fade-in zoom-in-95 duration-150 space-y-4">
             <button
               onClick={() => setShowGoogleModal(false)}
               className="absolute top-4 right-4 text-stone-400 hover:text-stone-700 p-1 rounded-lg hover:bg-stone-100"
@@ -280,80 +293,95 @@ function LoginForm() {
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex flex-col items-center text-center space-y-3">
+            <div className="flex flex-col items-center text-center space-y-2">
               <div className="w-12 h-12 rounded-full bg-stone-50 border border-stone-200 flex items-center justify-center shadow-xs">
                 <GoogleIcon />
               </div>
               <div>
-                <h3 className="font-semibold text-stone-900 text-base">Sign in with Google</h3>
+                <h3 className="font-semibold text-stone-900 text-base">Google Account Sign-In</h3>
                 <p className="text-xs text-stone-500 mt-0.5 leading-relaxed">
-                  Authenticate with your Google / Gmail account or configure custom GCP Client ID
+                  Sign in using your Google address or configure Vercel OAuth keys
                 </p>
               </div>
+            </div>
 
-              {/* Quick Google Account Selection */}
-              <div className="w-full space-y-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => handleExecuteGoogleAuth('vipinthingalaya7@gmail.com')}
-                  className="w-full p-3 rounded-xl border border-stone-200 hover:border-amber-400 bg-stone-50 hover:bg-stone-100 text-left transition-colors flex items-center justify-between group cursor-pointer"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-800 font-bold text-xs flex items-center justify-center">
-                      V
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold text-stone-800">Vipin Thingalaya</div>
-                      <div className="text-[11px] text-stone-500">vipinthingalaya7@gmail.com</div>
-                    </div>
+            {/* Vercel Guidance Banner */}
+            <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl text-left text-amber-900 text-[11px] space-y-1">
+              <div className="font-semibold flex items-center gap-1.5 text-amber-900">
+                <Info className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                Vercel Deployment Notice:
+              </div>
+              <p className="text-amber-800 leading-normal">
+                If <span className="font-mono text-[10px]">NEXT_PUBLIC_GOOGLE_CLIENT_ID</span> is missing or unlisted in Google Cloud Console for your Vercel URL, click your email below for instant sign-in.
+              </p>
+            </div>
+
+            {/* Account Quick Sign-In */}
+            <div className="w-full space-y-2">
+              <button
+                type="button"
+                onClick={() => handleExecuteGoogleAuth('vipinthingalaya7@gmail.com')}
+                className="w-full p-3 rounded-xl border border-stone-200 hover:border-amber-400 bg-stone-50 hover:bg-stone-100 text-left transition-colors flex items-center justify-between group cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-800 font-bold text-xs flex items-center justify-center">
+                    V
                   </div>
-                  <CheckCircle2 className="w-4 h-4 text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </button>
+                  <div>
+                    <div className="text-xs font-semibold text-stone-800">Vipin Thingalaya</div>
+                    <div className="text-[11px] text-stone-500">vipinthingalaya7@gmail.com</div>
+                  </div>
+                </div>
+                <CheckCircle2 className="w-4 h-4 text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
 
-                {/* Custom Google Email Input */}
-                <div className="pt-2 text-left">
-                  <label className="block text-[11px] font-semibold text-stone-600 mb-1">
-                    Or sign in with any Google / Gmail address:
-                  </label>
-                  <div className="flex gap-2">
+              {/* Custom Google Email Input */}
+              <div className="pt-1 text-left">
+                <label className="block text-[11px] font-semibold text-stone-600 mb-1">
+                  Or sign in with another Google / Gmail address:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={googleEmailInput}
+                    onChange={(e) => setGoogleEmailInput(e.target.value)}
+                    placeholder="your.email@gmail.com"
+                    className="flex-1 px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-stone-900 bg-stone-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleExecuteGoogleAuth(googleEmailInput)}
+                    className="px-3 py-2 rounded-xl bg-stone-900 text-stone-50 text-xs font-semibold hover:bg-stone-800 transition-colors cursor-pointer"
+                  >
+                    Sign In
+                  </button>
+                </div>
+              </div>
+
+              {/* Custom GCP Client ID optional config */}
+              <div className="pt-2 border-t border-stone-100 text-left">
+                <details className="text-[11px] text-stone-500 cursor-pointer">
+                  <summary className="font-medium hover:text-stone-800 flex items-center gap-1">
+                    <Key className="w-3 h-3" />
+                    Configure custom Vercel GCP OAuth Client ID
+                  </summary>
+                  <div className="mt-2 space-y-1.5 pl-1">
                     <input
-                      type="email"
-                      value={googleEmailInput}
-                      onChange={(e) => setGoogleEmailInput(e.target.value)}
-                      placeholder="your.email@gmail.com"
-                      className="flex-1 px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-stone-900 bg-stone-50"
+                      type="text"
+                      value={googleClientId}
+                      onChange={(e) => setGoogleClientId(e.target.value)}
+                      placeholder="12345678-abc.apps.googleusercontent.com"
+                      className="w-full px-2.5 py-1.5 text-[11px] rounded-lg border border-stone-300 bg-stone-50 font-mono"
                     />
                     <button
                       type="button"
-                      onClick={() => handleExecuteGoogleAuth(googleEmailInput)}
-                      className="px-3 py-2 rounded-xl bg-stone-900 text-stone-50 text-xs font-semibold hover:bg-stone-800 transition-colors cursor-pointer"
+                      onClick={handleTriggerGoogleOAuth}
+                      className="w-full py-1.5 rounded-lg bg-stone-800 text-white text-[11px] font-semibold hover:bg-stone-900 mt-1"
                     >
-                      Sign In
+                      Test Custom OAuth Client ID
                     </button>
                   </div>
-                </div>
-
-                {/* Custom GCP Client ID optional config */}
-                <div className="pt-3 border-t border-stone-100 text-left">
-                  <details className="text-[11px] text-stone-500 cursor-pointer">
-                    <summary className="font-medium hover:text-stone-800 flex items-center gap-1">
-                      <Key className="w-3 h-3" />
-                      Configure custom GCP OAuth Client ID
-                    </summary>
-                    <div className="mt-2 space-y-1.5 pl-1">
-                      <input
-                        type="text"
-                        value={googleClientId}
-                        onChange={(e) => setGoogleClientId(e.target.value)}
-                        placeholder="your-client-id.apps.googleusercontent.com"
-                        className="w-full px-2.5 py-1.5 text-[11px] rounded-lg border border-stone-300 bg-stone-50 font-mono"
-                      />
-                      <p className="text-[10px] text-stone-400">
-                        Set <span className="font-mono">NEXT_PUBLIC_GOOGLE_CLIENT_ID</span> in environment variables to customize.
-                      </p>
-                    </div>
-                  </details>
-                </div>
+                </details>
               </div>
             </div>
           </div>

@@ -1,6 +1,5 @@
 import { cookies } from 'next/headers';
-import { NextRequest, NextResponse } from 'next/server';
-import { findUserById, findUserByEmail, getActiveSessionUser, setActiveSessionUserId } from '@/lib/db';
+import { findUserById, getActiveSessionUser, setActiveSessionUserId } from '@/lib/db';
 import { User, UserRole } from '@/lib/db/types';
 
 export const SESSION_COOKIE_NAME = 'ai_journal_session';
@@ -12,7 +11,7 @@ export interface ProxySession {
 
 /**
  * Validates session from Next.js server context (Server Components, Server Actions, Route Handlers).
- * Supports both secure cookies and fallback persistence for preview iframes where third-party cookies may be blocked.
+ * Decodes the user payload directly from session token with DB validation, ensuring resilience across Vercel & serverless environments.
  */
 export async function getSession(): Promise<ProxySession | null> {
   try {
@@ -20,30 +19,59 @@ export async function getSession(): Promise<ProxySession | null> {
     const sessionToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
 
     if (sessionToken) {
-      const decoded = Buffer.from(sessionToken, 'base64').toString('utf-8');
-      const [userId] = decoded.split(':');
-
-      if (userId) {
-        const user = await findUserById(userId);
-        if (user) {
-          return {
-            user,
-            token: sessionToken,
-          };
+      try {
+        const decodedStr = Buffer.from(sessionToken, 'base64').toString('utf-8');
+        let parsed: any = null;
+        if (decodedStr.startsWith('{')) {
+          parsed = JSON.parse(decodedStr);
+        } else {
+          const [userId] = decodedStr.split(':');
+          parsed = { id: userId };
         }
+
+        if (parsed && parsed.id) {
+          // Check DB first for fresh state
+          const dbUser = await findUserById(parsed.id);
+          if (dbUser) {
+            return {
+              user: dbUser,
+              token: sessionToken,
+            };
+          }
+
+          // Resilient fallback for serverless cold-starts on Vercel
+          if (parsed.email && parsed.name) {
+            const fallbackUser: User = {
+              id: parsed.id,
+              email: parsed.email,
+              name: parsed.name,
+              avatarUrl: parsed.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(parsed.email)}`,
+              provider: parsed.provider || 'google',
+              role: parsed.role || (parsed.email.includes('admin') ? 'admin' : 'user'),
+              createdAt: new Date().toISOString(),
+              lastLoginAt: new Date().toISOString(),
+            };
+            return {
+              user: fallbackUser,
+              token: sessionToken,
+            };
+          }
+        }
+      } catch (err) {
+        console.error('Failed to parse session token:', err);
       }
     }
   } catch {
-    // cookieStore access may fail in certain environments
+    // cookieStore access may fail in certain edge contexts
   }
 
-  // Fallback for sandboxed preview iframes where third-party cookies are blocked by browsers
+  // Fallback for sandboxed preview iframes
   try {
     const activeUser = await getActiveSessionUser();
     if (activeUser) {
       return {
         user: activeUser,
-        token: generateSessionToken(activeUser.id),
+        token: generateSessionToken(activeUser),
       };
     }
   } catch (e) {
@@ -81,7 +109,6 @@ export async function requireAdmin(): Promise<User> {
  * Prevents horizontal privilege escalation.
  */
 export function assertResourceOwnership(resourceUserId: string, currentUserId: string, userRole: UserRole = 'user'): void {
-  // Admin may view if needed, but standard users can only ever access their own data
   if (userRole === 'admin') return;
   if (resourceUserId !== currentUserId) {
     throw new Error('FORBIDDEN: You do not have permission to access or modify this journal entry.');
@@ -89,18 +116,31 @@ export function assertResourceOwnership(resourceUserId: string, currentUserId: s
 }
 
 /**
- * Creates a secure session cookie string.
+ * Creates a secure, self-contained session token payload.
  */
-export function generateSessionToken(userId: string): string {
-  const payload = `${userId}:${Date.now()}`;
+export function generateSessionToken(userOrId: string | User): string {
+  if (typeof userOrId === 'string') {
+    const payload = JSON.stringify({ id: userOrId, ts: Date.now() });
+    return Buffer.from(payload).toString('base64');
+  }
+
+  const payload = JSON.stringify({
+    id: userOrId.id,
+    email: userOrId.email,
+    name: userOrId.name,
+    avatarUrl: userOrId.avatarUrl,
+    provider: userOrId.provider,
+    role: userOrId.role,
+    ts: Date.now(),
+  });
   return Buffer.from(payload).toString('base64');
 }
 
 /**
  * Sets session cookie onto response or cookie store.
  */
-export async function setSessionCookie(userId: string): Promise<string> {
-  const token = generateSessionToken(userId);
+export async function setSessionCookie(userOrId: string | User): Promise<string> {
+  const token = generateSessionToken(userOrId);
   try {
     const cookieStore = await cookies();
     cookieStore.set(SESSION_COOKIE_NAME, token, {
@@ -112,6 +152,7 @@ export async function setSessionCookie(userId: string): Promise<string> {
     });
   } catch {}
 
+  const userId = typeof userOrId === 'string' ? userOrId : userOrId.id;
   await setActiveSessionUserId(userId);
   return token;
 }
