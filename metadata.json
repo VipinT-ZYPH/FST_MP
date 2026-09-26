@@ -1,0 +1,6 @@
+{
+  "name": "AI Journal & Reflection",
+  "description": "A secure personal AI journaling and reflection app with insights, summaries, and sentiment analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
