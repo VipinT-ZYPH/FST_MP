@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       role: role || 'user',
     });
 
-    const token = await setSessionCookie(user.id);
+    const token = await setSessionCookie(user);
 
     const response = NextResponse.json({ success: true, user, token });
     response.cookies.set({

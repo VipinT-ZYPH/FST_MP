@@ -21,8 +21,12 @@ interface DatabaseSchema {
   activeSessionUserId?: string | null;
 }
 
-const DATA_DIR = path.join(process.cwd(), '.data');
-const DB_FILE = path.join(DATA_DIR, 'journal_store.json');
+function getDbFilePath(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.TMPDIR) {
+    return '/tmp/journal_store.json';
+  }
+  return path.join(process.cwd(), '.data', 'journal_store.json');
+}
 
 // Default initial state
 let memoryDb: DatabaseSchema = {
@@ -37,10 +41,12 @@ let isInitialized = false;
 
 async function initDb(): Promise<void> {
   if (isInitialized) return;
+  const dbFile = getDbFilePath();
   try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
+    const dir = path.dirname(dbFile);
+    await fs.mkdir(dir, { recursive: true });
     try {
-      const data = await fs.readFile(DB_FILE, 'utf-8');
+      const data = await fs.readFile(dbFile, 'utf-8');
       const parsed = JSON.parse(data);
       if (parsed && Array.isArray(parsed.users)) {
         memoryDb = {
@@ -61,11 +67,17 @@ async function initDb(): Promise<void> {
 }
 
 async function persistDb(): Promise<void> {
+  const dbFile = getDbFilePath();
   try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(DB_FILE, JSON.stringify(memoryDb, null, 2), 'utf-8');
+    const dir = path.dirname(dbFile);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(dbFile, JSON.stringify(memoryDb, null, 2), 'utf-8');
   } catch (err) {
-    console.error('Failed to write database file:', err);
+    try {
+      await fs.writeFile('/tmp/journal_store.json', JSON.stringify(memoryDb, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Failed to write database file:', e);
+    }
   }
 }
 
