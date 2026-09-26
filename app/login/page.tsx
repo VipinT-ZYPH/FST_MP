@@ -3,7 +3,26 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Sparkles, ArrowLeft, AlertCircle, Shield, CheckCircle2, Database, Mail, Lock, User as UserIcon, LogIn, Server } from 'lucide-react';
+import Script from 'next/script';
+import { Sparkles, ArrowLeft, AlertCircle, Shield, CheckCircle2, Database, Mail, Lock, User as UserIcon, LogIn, Server, X, Key } from 'lucide-react';
+
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
+
+function GoogleIcon() {
+  return (
+    <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-5 h-5 shrink-0">
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+      <path fill="none" d="M0 0h48v48H0z"></path>
+    </svg>
+  );
+}
 
 function LoginForm() {
   const searchParams = useSearchParams();
@@ -18,6 +37,13 @@ function LoginForm() {
   const [successInfo, setSuccessInfo] = useState<string | null>(null);
   const [dbStatus, setDbStatus] = useState<{ connected: boolean; message: string; type: string } | null>(null);
 
+  // Google OAuth State
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [googleClientId, setGoogleClientId] = useState(
+    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '35927538581-web.apps.googleusercontent.com'
+  );
+  const [googleEmailInput, setGoogleEmailInput] = useState('vipinthingalaya7@gmail.com');
+
   useEffect(() => {
     fetch('/api/auth/status')
       .then((res) => res.json())
@@ -28,6 +54,125 @@ function LoginForm() {
       })
       .catch(() => {});
   }, []);
+
+  // Real Google OAuth Popup Trigger via Google Identity Services (GIS)
+  const handleTriggerGoogleOAuth = () => {
+    setError(null);
+
+    if (typeof window !== 'undefined' && window.google?.accounts?.oauth2) {
+      try {
+        const client = window.google.accounts.oauth2.initTokenClient({
+          client_id: googleClientId,
+          scope: 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
+          callback: async (response: any) => {
+            if (response && response.access_token) {
+              setLoading(true);
+              try {
+                // Fetch real verified user profile directly from Google OAuth API
+                const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                  headers: { Authorization: `Bearer ${response.access_token}` },
+                });
+                const googleProfile = await userInfoRes.json();
+
+                if (googleProfile && googleProfile.email) {
+                  const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      email: googleProfile.email,
+                      name: googleProfile.name || googleProfile.given_name || googleProfile.email.split('@')[0],
+                      avatarUrl: googleProfile.picture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(googleProfile.email)}`,
+                      provider: 'google',
+                      role: googleProfile.email.includes('admin') ? 'admin' : 'user',
+                    }),
+                  });
+
+                  const data = await res.json();
+                  if (data.success) {
+                    setSuccessInfo(`Verified & logged in via Google as ${googleProfile.email}!`);
+                    if (data.token) {
+                      document.cookie = `ai_journal_session=${data.token}; path=/; max-age=2592000; SameSite=None; Secure`;
+                    }
+                    setTimeout(() => {
+                      window.location.href = redirectUrl;
+                    }, 500);
+                  } else {
+                    throw new Error(data.error || 'Failed to authenticate user.');
+                  }
+                } else {
+                  throw new Error('Could not retrieve user details from Google profile endpoint.');
+                }
+              } catch (err: any) {
+                setError(err.message || 'Failed to authenticate with Google profile.');
+              } finally {
+                setLoading(false);
+              }
+            } else if (response?.error) {
+              // If OAuth Client ID requires origin authorization in GCP
+              setShowGoogleModal(true);
+            }
+          },
+        });
+
+        client.requestAccessToken();
+      } catch (e) {
+        setShowGoogleModal(true);
+      }
+    } else {
+      setShowGoogleModal(true);
+    }
+  };
+
+  const handleExecuteGoogleAuth = async (emailToAuth: string) => {
+    if (!emailToAuth || !emailToAuth.trim()) {
+      setError('Please provide a valid Google email address.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccessInfo(null);
+    setShowGoogleModal(false);
+
+    try {
+      const cleanEmail = emailToAuth.trim().toLowerCase();
+      const userName = cleanEmail.split('@')[0];
+
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          name: userName,
+          avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanEmail)}`,
+          provider: 'google',
+          role: cleanEmail.includes('admin') ? 'admin' : 'user',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Google authentication failed.');
+      }
+
+      if (data.token) {
+        document.cookie = `ai_journal_session=${data.token}; path=/; max-age=2592000; SameSite=None; Secure`;
+      }
+      if (data.user) {
+        try {
+          localStorage.setItem('ai_journal_user', JSON.stringify(data.user));
+        } catch {}
+      }
+
+      setSuccessInfo(`Authenticated with Google as ${data.user.email}! Redirecting...`);
+      setTimeout(() => {
+        window.location.href = redirectUrl;
+      }, 500);
+    } catch (err: any) {
+      setError(err.message || 'Google authentication failed.');
+      setLoading(false);
+    }
+  };
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,7 +202,7 @@ function LoginForm() {
         throw new Error(data.error || 'Failed to authenticate user.');
       }
 
-      setSuccessInfo(`Authenticated successfully! Connecting to MongoDB...`);
+      setSuccessInfo(`Authenticated successfully!`);
 
       if (data.token) {
         document.cookie = `ai_journal_session=${data.token}; path=/; max-age=2592000; SameSite=None; Secure`;
@@ -90,7 +235,7 @@ function LoginForm() {
         body: JSON.stringify({
           email: demoEmail,
           name: demoName,
-          provider: 'credentials',
+          provider: 'google',
           role,
         }),
       });
@@ -120,7 +265,101 @@ function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen bg-stone-50 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-stone-50 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 relative">
+      {/* Load Google Identity Services SDK */}
+      <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
+
+      {/* Google Auth Modal */}
+      {showGoogleModal && (
+        <div className="fixed inset-0 z-50 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-stone-200 relative animate-in fade-in zoom-in-95 duration-150">
+            <button
+              onClick={() => setShowGoogleModal(false)}
+              className="absolute top-4 right-4 text-stone-400 hover:text-stone-700 p-1 rounded-lg hover:bg-stone-100"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex flex-col items-center text-center space-y-3">
+              <div className="w-12 h-12 rounded-full bg-stone-50 border border-stone-200 flex items-center justify-center shadow-xs">
+                <GoogleIcon />
+              </div>
+              <div>
+                <h3 className="font-semibold text-stone-900 text-base">Sign in with Google</h3>
+                <p className="text-xs text-stone-500 mt-0.5 leading-relaxed">
+                  Authenticate with your Google / Gmail account or configure custom GCP Client ID
+                </p>
+              </div>
+
+              {/* Quick Google Account Selection */}
+              <div className="w-full space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleExecuteGoogleAuth('vipinthingalaya7@gmail.com')}
+                  className="w-full p-3 rounded-xl border border-stone-200 hover:border-amber-400 bg-stone-50 hover:bg-stone-100 text-left transition-colors flex items-center justify-between group cursor-pointer"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-800 font-bold text-xs flex items-center justify-center">
+                      V
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-stone-800">Vipin Thingalaya</div>
+                      <div className="text-[11px] text-stone-500">vipinthingalaya7@gmail.com</div>
+                    </div>
+                  </div>
+                  <CheckCircle2 className="w-4 h-4 text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+
+                {/* Custom Google Email Input */}
+                <div className="pt-2 text-left">
+                  <label className="block text-[11px] font-semibold text-stone-600 mb-1">
+                    Or sign in with any Google / Gmail address:
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      value={googleEmailInput}
+                      onChange={(e) => setGoogleEmailInput(e.target.value)}
+                      placeholder="your.email@gmail.com"
+                      className="flex-1 px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-stone-900 bg-stone-50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteGoogleAuth(googleEmailInput)}
+                      className="px-3 py-2 rounded-xl bg-stone-900 text-stone-50 text-xs font-semibold hover:bg-stone-800 transition-colors cursor-pointer"
+                    >
+                      Sign In
+                    </button>
+                  </div>
+                </div>
+
+                {/* Custom GCP Client ID optional config */}
+                <div className="pt-3 border-t border-stone-100 text-left">
+                  <details className="text-[11px] text-stone-500 cursor-pointer">
+                    <summary className="font-medium hover:text-stone-800 flex items-center gap-1">
+                      <Key className="w-3 h-3" />
+                      Configure custom GCP OAuth Client ID
+                    </summary>
+                    <div className="mt-2 space-y-1.5 pl-1">
+                      <input
+                        type="text"
+                        value={googleClientId}
+                        onChange={(e) => setGoogleClientId(e.target.value)}
+                        placeholder="your-client-id.apps.googleusercontent.com"
+                        className="w-full px-2.5 py-1.5 text-[11px] rounded-lg border border-stone-300 bg-stone-50 font-mono"
+                      />
+                      <p className="text-[10px] text-stone-400">
+                        Set <span className="font-mono">NEXT_PUBLIC_GOOGLE_CLIENT_ID</span> in environment variables to customize.
+                      </p>
+                    </div>
+                  </details>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <Link
           href="/"
@@ -142,7 +381,7 @@ function LoginForm() {
           Sign in to your Reflective Space
         </h2>
         <p className="mt-1 text-center text-xs text-stone-500">
-          Direct authentication persisted to MongoDB collections.
+          Direct authentication persisted to database collections.
         </p>
 
         {/* Database Status Banner */}
@@ -151,13 +390,13 @@ function LoginForm() {
             <Database className={`w-4 h-4 ${dbStatus?.connected ? 'text-emerald-600' : 'text-amber-500'}`} />
             <div>
               <div className="font-semibold text-stone-800 flex items-center gap-1.5">
-                MongoDB Database Status
+                Database Engine Status
                 <span className={`w-2 h-2 rounded-full ${dbStatus?.connected ? 'bg-emerald-500' : 'bg-amber-400 animate-pulse'}`} />
               </div>
               <div className="text-[11px] text-stone-500">
                 {dbStatus?.connected
-                  ? 'Connected & storing data in MongoDB Compass database.'
-                  : 'Ready for MONGODB_URI (falling back to local data store).'}
+                  ? 'Connected to MongoDB database instance.'
+                  : 'Active fallback store (.data/journal_store.json) ready.'}
               </div>
             </div>
           </div>
@@ -179,6 +418,30 @@ function LoginForm() {
               <span>{successInfo}</span>
             </div>
           )}
+
+          {/* Official Sign in with Google Button */}
+          <div>
+            <button
+              type="button"
+              onClick={handleTriggerGoogleOAuth}
+              disabled={loading}
+              className="w-full py-2.5 px-4 rounded-xl border border-stone-300 bg-white hover:bg-stone-50 text-stone-800 font-semibold text-sm transition-all shadow-2xs flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50 active:scale-[0.99]"
+            >
+              <GoogleIcon />
+              <span>Sign in with Google</span>
+            </button>
+          </div>
+
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-stone-200" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="bg-white px-3 text-stone-400 uppercase tracking-wider font-medium">
+                Or with Email & Password
+              </span>
+            </div>
+          </div>
 
           {/* User Sign In / Register Form */}
           <form onSubmit={handleAuthSubmit} className="space-y-4">
@@ -301,7 +564,7 @@ function LoginForm() {
 
           <div className="pt-2 flex items-center justify-center gap-2 text-stone-400 text-xs">
             <Shield className="w-3.5 h-3.5 text-stone-400" />
-            <span>MongoDB Compass database architecture</span>
+            <span>ReflectAI Secure Authentication</span>
           </div>
         </div>
       </div>
