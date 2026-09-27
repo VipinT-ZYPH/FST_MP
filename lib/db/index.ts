@@ -106,6 +106,12 @@ export async function getDbStatus(): Promise<{
 
 // ================= User Operations =================
 
+export function getDeterministicUserId(email: string): string {
+  const clean = email.toLowerCase().trim();
+  const hash = crypto.createHash('sha256').update(clean).digest('hex').slice(0, 12);
+  return `usr_${hash}`;
+}
+
 export async function findUserById(id: string): Promise<User | null> {
   const db = await getMongoDb();
   if (db) {
@@ -176,7 +182,7 @@ export async function createOrUpdateUser(userData: {
     }
 
     const newUser: User = {
-      id: `usr_${crypto.randomUUID().slice(0, 8)}`,
+      id: getDeterministicUserId(cleanEmail),
       email: cleanEmail,
       name: userData.name || cleanEmail.split('@')[0],
       avatarUrl:
@@ -217,7 +223,7 @@ export async function createOrUpdateUser(userData: {
   }
 
   const newUser: User = {
-    id: `usr_${crypto.randomUUID().slice(0, 8)}`,
+    id: getDeterministicUserId(cleanEmail),
     email: cleanEmail,
     name: userData.name || cleanEmail.split('@')[0],
     avatarUrl:
@@ -755,4 +761,66 @@ export async function deleteJournalSession(sessionId: string, userId: string): P
     return true;
   }
   return false;
+}
+
+export async function saveBulkSessions(userId: string, sessions: JournalSession[]): Promise<void> {
+  if (!Array.isArray(sessions) || sessions.length === 0) return;
+  const db = await getMongoDb();
+  if (db) {
+    const col = db.collection<JournalSession>('sessions');
+    for (const sess of sessions) {
+      if (!sess.id) continue;
+      const cleanSess = { ...sess, userId };
+      await col.updateOne(
+        { id: sess.id, userId },
+        { $set: cleanSess },
+        { upsert: true }
+      );
+    }
+    return;
+  }
+
+  await initDb();
+  for (const sess of sessions) {
+    if (!sess.id) continue;
+    const cleanSess = { ...sess, userId };
+    const idx = memoryDb.sessions.findIndex((s) => s.id === sess.id && s.userId === userId);
+    if (idx >= 0) {
+      memoryDb.sessions[idx] = cleanSess;
+    } else {
+      memoryDb.sessions.unshift(cleanSess);
+    }
+  }
+  await persistDb();
+}
+
+export async function saveBulkEntries(userId: string, entries: JournalEntry[]): Promise<void> {
+  if (!Array.isArray(entries) || entries.length === 0) return;
+  const db = await getMongoDb();
+  if (db) {
+    const col = db.collection<JournalEntry>('entries');
+    for (const entry of entries) {
+      if (!entry.id) continue;
+      const cleanEntry = { ...entry, userId };
+      await col.updateOne(
+        { id: entry.id, userId },
+        { $set: cleanEntry },
+        { upsert: true }
+      );
+    }
+    return;
+  }
+
+  await initDb();
+  for (const entry of entries) {
+    if (!entry.id) continue;
+    const cleanEntry = { ...entry, userId };
+    const idx = memoryDb.entries.findIndex((e) => e.id === entry.id && e.userId === userId);
+    if (idx >= 0) {
+      memoryDb.entries[idx] = cleanEntry;
+    } else {
+      memoryDb.entries.unshift(cleanEntry);
+    }
+  }
+  await persistDb();
 }

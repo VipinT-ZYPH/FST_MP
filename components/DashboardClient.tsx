@@ -38,8 +38,55 @@ export function DashboardClient({
   initialSessions = [],
 }: DashboardClientProps) {
   const [activeTab, setActiveTab] = useState<'chat' | 'journal'>('chat');
-  const [entries, setEntries] = useState<JournalEntry[]>(initialEntries);
+  const entriesStorageKey = `reflectai_entries_${user.email.toLowerCase()}`;
+
+  const [entries, setEntries] = useState<JournalEntry[]>(() => {
+    if (typeof window === 'undefined') return initialEntries;
+    try {
+      const savedRaw = localStorage.getItem(`reflectai_entries_${user.email.toLowerCase()}`);
+      if (savedRaw) {
+        const savedEntries: JournalEntry[] = JSON.parse(savedRaw);
+        if (Array.isArray(savedEntries) && savedEntries.length > 0) {
+          const map = new Map<string, JournalEntry>();
+          initialEntries.forEach((e) => map.set(e.id, e));
+          savedEntries.forEach((e) => {
+            if (!map.has(e.id)) {
+              map.set(e.id, e);
+            }
+          });
+          return Array.from(map.values()).sort(
+            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+          );
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse local entries:', e);
+    }
+    return initialEntries;
+  });
+
   const [synthesis, setSynthesis] = useState<WeeklySynthesis | null>(initialSynthesis);
+
+  // Background server sync on mount
+  React.useEffect(() => {
+    if (entries.length > 0) {
+      fetch('/api/sessions/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries }),
+      }).catch(() => {});
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (entries.length > 0) {
+      try {
+        localStorage.setItem(entriesStorageKey, JSON.stringify(entries));
+      } catch (e) {
+        console.error('Failed to save entries to local storage:', e);
+      }
+    }
+  }, [entries, entriesStorageKey]);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');

@@ -81,10 +81,39 @@ const PROMPT_STARTERS = [
 const createTempId = () => `temp_u_${Math.random().toString(36).slice(2, 9)}`;
 
 export function ReflectionChat({ user, initialSessions, onSaveAsEntry }: ReflectionChatProps) {
-  const [sessions, setSessions] = useState<JournalSession[]>(initialSessions);
-  const [activeSessionId, setActiveSessionId] = useState<string>(
-    initialSessions[0]?.id || ''
-  );
+  const storageKey = `reflectai_chat_sessions_${user.email.toLowerCase()}`;
+
+  const [sessions, setSessions] = useState<JournalSession[]>(() => {
+    if (typeof window === 'undefined') return initialSessions;
+    try {
+      const savedRaw = localStorage.getItem(`reflectai_chat_sessions_${user.email.toLowerCase()}`);
+      if (savedRaw) {
+        const savedSessions: JournalSession[] = JSON.parse(savedRaw);
+        if (Array.isArray(savedSessions) && savedSessions.length > 0) {
+          const sessionMap = new Map<string, JournalSession>();
+          initialSessions.forEach((s) => sessionMap.set(s.id, s));
+          savedSessions.forEach((s) => {
+            const existing = sessionMap.get(s.id);
+            if (!existing || (s.messages && s.messages.length > (existing.messages?.length || 0))) {
+              sessionMap.set(s.id, s);
+            }
+          });
+
+          return Array.from(sessionMap.values()).sort(
+            (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+          );
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse local chat sessions:', e);
+    }
+    return initialSessions;
+  });
+
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
+    return sessions[0]?.id || initialSessions[0]?.id || '';
+  });
+
   const [inputMessage, setInputMessage] = useState('');
   const [selectedMode, setSelectedMode] = useState<ReflectionMode>('action_steps');
   const [loading, setLoading] = useState(false);
@@ -96,6 +125,28 @@ export function ReflectionChat({ user, initialSessions, onSaveAsEntry }: Reflect
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Background server sync on mount
+  useEffect(() => {
+    if (sessions.length > 0) {
+      fetch('/api/sessions/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessions }),
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Save to localStorage when sessions change
+  useEffect(() => {
+    if (sessions.length > 0) {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(sessions));
+      } catch (e) {
+        console.error('Failed to save chat sessions to local storage:', e);
+      }
+    }
+  }, [sessions, storageKey]);
 
   // Auto-scroll to bottom of messages
   const scrollToBottom = () => {

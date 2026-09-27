@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { findUserById, getActiveSessionUser, setActiveSessionUserId } from '@/lib/db';
+import { findUserById, findUserByEmail, getActiveSessionUser, setActiveSessionUserId } from '@/lib/db';
 import { User, UserRole } from '@/lib/db/types';
 
 export const SESSION_COOKIE_NAME = 'ai_journal_session';
@@ -29,9 +29,12 @@ export async function getSession(): Promise<ProxySession | null> {
           parsed = { id: userId };
         }
 
-        if (parsed && parsed.id) {
+        if (parsed && (parsed.id || parsed.email)) {
           // Check DB first for fresh state
-          const dbUser = await findUserById(parsed.id);
+          let dbUser = parsed.id ? await findUserById(parsed.id) : null;
+          if (!dbUser && parsed.email) {
+            dbUser = await findUserByEmail(parsed.email);
+          }
           if (dbUser) {
             return {
               user: dbUser,
